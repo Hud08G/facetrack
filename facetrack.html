@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+<title>FaceTrack</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:2rem;gap:1.5rem}
+h1{font-size:22px;font-weight:600;letter-spacing:.5px}
+.status{font-size:13px;color:#888;text-align:center;line-height:1.6}
+.status.connected{color:#4caf50}
+.status.error{color:#f44336}
+input{width:100%;padding:12px 16px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:16px;text-align:center}
+input::placeholder{color:#555}
+button{width:100%;padding:14px;border-radius:10px;border:none;background:#B71C1C;color:#fff;font-size:16px;font-weight:600;cursor:pointer}
+button:active{background:#991515}
+button.stop{background:#333}
+.data{background:#1a1a1a;border-radius:10px;padding:1rem;width:100%;font-family:monospace;font-size:13px;color:#4caf50;line-height:2}
+.data span{color:#888}
+.permission-btn{width:100%;padding:14px;border-radius:10px;border:none;background:#1565C0;color:#fff;font-size:16px;font-weight:600;cursor:pointer;display:none}
+</style>
+</head>
+<body>
+<h1>✈ FaceTrack</h1>
+<div class="status" id="status">Enter your PC's IP address and tap Start</div>
+
+<input type="text" id="ip" placeholder="192.168.1.x" inputmode="decimal"/>
+
+<button class="permission-btn" id="perm-btn" onclick="requestPermission()">Allow Motion Access</button>
+<button id="main-btn" onclick="toggle()">Start Tracking</button>
+
+<div class="data" id="data">
+  <div><span>Yaw &nbsp;&nbsp;</span> <span id="d-yaw">—</span></div>
+  <div><span>Pitch </span> <span id="d-pitch">—</span></div>
+  <div><span>Roll &nbsp;&nbsp;</span> <span id="d-roll">—</span></div>
+  <div><span>Hz &nbsp;&nbsp;&nbsp;</span> <span id="d-hz">—</span></div>
+</div>
+
+<script>
+let ws = null;
+let running = false;
+let interval = null;
+let yaw = 0, pitch = 0, roll = 0;
+let lastSend = Date.now();
+let hz = 0;
+
+// Smooth values
+let sYaw = 0, sPitch = 0, sRoll = 0;
+const SMOOTH = 0.25;
+
+// iOS requires permission for DeviceOrientationEvent
+async function requestPermission() {
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    const result = await DeviceOrientationEvent.requestPermission();
+    if (result === 'granted') {
+      document.getElementById('perm-btn').style.display = 'none';
+      document.getElementById('status').textContent = 'Motion access granted. Ready to track.';
+      startListening();
+    } else {
+      document.getElementById('status').textContent = 'Motion access denied.';
+      document.getElementById('status').className = 'status error';
+    }
+  }
+}
+
+function startListening() {
+  window.addEventListener('deviceorientation', (e) => {
+    // alpha = compass heading (yaw), beta = front-back tilt (pitch), gamma = left-right tilt (roll)
+    yaw   = e.alpha || 0;  // 0-360
+    pitch = e.beta  || 0;  // -180 to 180
+    roll  = e.gamma || 0;  // -90 to 90
+
+    // Smooth
+    sYaw   = sYaw   * SMOOTH + yaw   * (1 - SMOOTH);
+    sPitch = sPitch * SMOOTH + pitch * (1 - SMOOTH);
+    sRoll  = sRoll  * SMOOTH + roll  * (1 - SMOOTH);
+
+    document.getElementById('d-yaw').textContent   = sYaw.toFixed(1) + '°';
+    document.getElementById('d-pitch').textContent = sPitch.toFixed(1) + '°';
+    document.getElementById('d-roll').textContent  = sRoll.toFixed(1) + '°';
+  });
+}
+
+function toggle() {
+  if (!running) {
+    startTracking();
+  } else {
+    stopTracking();
+  }
+}
+
+function startTracking() {
+  const ip = document.getElementById('ip').value.trim();
+  if (!ip) {
+    document.getElementById('status').textContent = 'Enter your PC IP address first.';
+    document.getElementById('status').className = 'status error';
+    return;
+  }
+
+  // Check if we need permission first (iOS 13+)
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    document.getElementById('perm-btn').style.display = 'block';
+    document.getElementById('status').textContent = 'Tap "Allow Motion Access" first.';
+    return;
+  } else {
+    startListening();
+  }
+
+  // Connect WebSocket to PC
+  const wsUrl = `ws://${ip}:8765`;
+  document.getElementById('status').textContent = `Connecting to ${wsUrl}...`;
+  document.getElementById('status').className = 'status';
+
+  try {
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      running = true;
+      document.getElementById('status').textContent = `Connected to ${ip} ✓`;
+      document.getElementById('status').className = 'status connected';
+      document.getElementById('main-btn').textContent = 'Stop Tracking';
+      document.getElementById('main-btn').className = 'stop';
+
+      // Send at ~60hz
+      interval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const msg = `${sYaw.toFixed(2)},${sPitch.toFixed(2)},${sRoll.toFixed(2)}`;
+          ws.send(msg);
+          const now = Date.now();
+          hz = Math.round(1000 / (now - lastSend));
+          lastSend = now;
+          document.getElementById('d-hz').textContent = hz;
+        }
+      }, 16);
+    };
+
+    ws.onerror = () => {
+      document.getElementById('status').textContent = 'Connection failed. Is the bridge running?';
+      document.getElementById('status').className = 'status error';
+      stopTracking();
+    };
+
+    ws.onclose = () => {
+      if (running) {
+        document.getElementById('status').textContent = 'Disconnected.';
+        document.getElementById('status').className = 'status error';
+        stopTracking();
+      }
+    };
+
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+    document.getElementById('status').className = 'status error';
+  }
+}
+
+function stopTracking() {
+  running = false;
+  if (interval) { clearInterval(interval); interval = null; }
+  if (ws) { ws.close(); ws = null; }
+  document.getElementById('main-btn').textContent = 'Start Tracking';
+  document.getElementById('main-btn').className = '';
+  document.getElementById('status').textContent = 'Stopped.';
+  document.getElementById('status').className = 'status';
+}
+</script>
+</body>
+</html>

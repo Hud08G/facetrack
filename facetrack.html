@@ -25,7 +25,7 @@ button.stop{background:#333}
 <h1>✈ FaceTrack</h1>
 <div class="status" id="status">Enter your PC's IP address and tap Start</div>
 
-<input type="text" id="ip" placeholder="192.168.1.x" inputmode="decimal"/>
+<div style="font-size:12px;color:#555;text-align:center">Connecting via secure tunnel</div>
 
 <button class="permission-btn" id="perm-btn" onclick="requestPermission()">Allow Motion Access</button>
 <button id="main-btn" onclick="toggle()">Start Tracking</button>
@@ -108,7 +108,7 @@ function startTracking() {
   }
 
   // Connect WebSocket to PC
-  const wsUrl = `ws://${ip}:8765`;
+  const wsUrl = `wss://onyx-gatherer-showoff.ngrok-free.dev`;
   document.getElementById('status').textContent = `Connecting to ${wsUrl}...`;
   document.getElementById('status').className = 'status';
 

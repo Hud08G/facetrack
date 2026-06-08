@@ -68,7 +68,9 @@ async function toggle() {
   window.addEventListener('deviceorientation', onOrientation);
   setStatus('Connecting to bridge...', '');
 
-  ws = new WebSocket(WS_URL);
+  ws = new WebSocket(WS_URL, [], {
+    headers: { 'ngrok-skip-browser-warning': 'true' }
+  });
 
   ws.onopen = () => {
     running = true;
@@ -79,7 +81,7 @@ async function toggle() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(sA.toFixed(2) + ',' + sB.toFixed(2) + ',' + sG.toFixed(2));
       }
-    }, 16);
+    }, 100);
   };
 
   ws.onerror = (e) => {
